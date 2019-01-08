@@ -1,7 +1,8 @@
 # wechatMiniProgramCode
 ## 微信小程序二维码生成器
 
-### 技术栈: Spring boot v2.1.1 + Redis
+### 技术栈: Spring boot v2.1.1 + Redis + Cache + Hibernate + MySQL
+### 食用方法: 按照application.yml的数据库配置好数据库名和用户密码, 运行Redis, 然后直接运行即可
 
 获取二维码图片的base64编码数据
 
