@@ -1,8 +1,11 @@
 package top.roothk.wechatminiutils.utils;
 
 import com.alibaba.fastjson.JSONObject;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.CacheConfig;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -10,8 +13,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
-import sun.misc.BASE64Encoder;
+import top.roothk.wechatminiutils.entity.WechatConfig;
 
+import java.util.Base64;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -21,6 +25,8 @@ import java.util.concurrent.TimeUnit;
  * @author roothk
  * @version 1.0
  */
+@Slf4j
+@CacheConfig(cacheNames = "wechatMiniUtils")
 @Component
 public class WechatMiniUtils {
 
@@ -30,21 +36,16 @@ public class WechatMiniUtils {
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
-    @Value("${top.roothk.config.wechat.miniProgram.appId}")
-    private String appId;
-    @Value("${top.roothk.config.wechat.miniProgram.secret}")
-    private String secret;
-
     /**
      * 获取redis中的小程序AccessToken
      *
      * @return
      */
-    public String getAccessToken() {
-        if (stringRedisTemplate.hasKey("wechatMiniAccessToken"))
-            return stringRedisTemplate.opsForValue().get("wechatMiniAccessToken");
+    public String getAccessToken(WechatConfig config) {
+        if (stringRedisTemplate.hasKey(config.getMiniAppId() + ":wechatMiniAccessToken"))
+            return stringRedisTemplate.opsForValue().get(config.getMiniAppId() + ":wechatMiniAccessToken");
         else
-            return getwechatMiniToken();
+            return getwechatMiniToken(config);
     }
 
     /**
@@ -52,14 +53,14 @@ public class WechatMiniUtils {
      *
      * @return
      */
-    private String getwechatMiniToken() {
+    private String getwechatMiniToken(WechatConfig config) {
 //        Setting setting = SystemUtils.getSetting();
         RestTemplate restTemplate = new RestTemplate();
         String accessTokenData = restTemplate.getForObject(GET_ACCESSTOKEN_URL
-                + "?grant_type=client_credential&appid=" + appId
-                + "&secret=" + secret, String.class);
+                + "?grant_type=client_credential&appid=" + config.getMiniAppId()
+                + "&secret=" + config.getMiniSecret(), String.class);
         JSONObject data = JSONObject.parseObject(accessTokenData);
-        stringRedisTemplate.opsForValue().set("wechatMiniAccessToken", data.getString("access_token"), data.getLong("expires_in"), TimeUnit.SECONDS);
+        stringRedisTemplate.opsForValue().set(config.getMiniAppId() + ":wechatMiniAccessToken", data.getString("access_token"), data.getLong("expires_in"), TimeUnit.SECONDS);
         return data.getString("access_token");
     }
 
@@ -74,7 +75,8 @@ public class WechatMiniUtils {
      * @param isHyaline     是否需要透明底色
      * @return              二维码图片的base64
      */
-    public String getWXACodeUnlimit(String page, Map<String, String> sceneData, Integer width, Boolean autoColor, Map<String, String> lineColor, Boolean isHyaline) {
+    @Cacheable
+    public String getWXACodeUnlimit(String page, Map<String, String> sceneData, Integer width, Boolean autoColor, Map<String, Object> lineColor, Boolean isHyaline, WechatConfig config) {
         JSONObject data = new JSONObject();
         data.put("page", page);
         data.put("scene", format(sceneData));
@@ -90,10 +92,26 @@ public class WechatMiniUtils {
         RestTemplate restTemplate = new RestTemplate();
         HttpHeaders headers = new HttpHeaders();
         HttpEntity<String> httpEntity = new HttpEntity<String>(data.toJSONString(), headers);
-        ResponseEntity<byte[]> response = restTemplate.exchange(GET_WXACODE_UNLIMIT_URL + "?access_token=" + getAccessToken(), HttpMethod.POST,
+        ResponseEntity<byte[]> response = restTemplate.exchange(GET_WXACODE_UNLIMIT_URL + "?access_token=" + getAccessToken(config), HttpMethod.POST,
                 httpEntity, byte[].class);
-        BASE64Encoder encoder = new BASE64Encoder();
-        return response != null ? encoder.encode(response.getBody()) : "";
+        Base64.Encoder encoder = Base64.getEncoder();
+        return response != null ? encoder.encodeToString(response.getBody()) : "";
+    }
+
+    /**
+     * 清空缓存
+     */
+    @CacheEvict
+    public void clean(String page, Map<String, String> sceneData, Integer width, Boolean autoColor, Map<String, String> lineColor, Boolean isHyaline, WechatConfig config) {
+        log.info("清空指定二维码缓存");
+    }
+
+    /**
+     * 清空所有缓存
+     */
+    @CacheEvict(allEntries=true)
+    public void cleanAll() {
+        log.info("清空所有二维码缓存");
     }
 
     private String format(Map<String, String> data) {
